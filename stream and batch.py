@@ -10,11 +10,40 @@ def preprocess_data(df):
     sniffing_unsecured_attacks = ["Network Sniffing", "Unsecured Credential", "Credential Leakage"]
     df = df.filter(col("attack_type").isin(sniffing_unsecured_attacks))
 
-    # ... (rest of the preprocessing code)
+    df = df.select(
+        concat_ws("_", "src_ip", "src_port").alias("src"),
+        concat_ws("_", "dest_ip", "dest_port").alias("dest"),
+        "protocol",
+        "request",
+        "attack_type",
+    )
+
+    df = df.groupBy("attack_type") \
+        .agg(
+            collect_set("src").alias("src_set"),
+            collect_set("dest").alias("dest_set"),
+            collect_set("protocol").alias("protocol_set"),
+            collect_set("request").alias("request_set"),
+        )
+
+    df = df.withColumn("items", array_union("src_set", "dest_set", "protocol_set", "request_set")) \
+        .select("attack_type", "items")
+
+    return df
 
 # Function to perform association rule mining
 def perform_association_rule_mining(df):
-    # ... (same as previous association rule mining code)
+    min_support = 0.1
+    min_confidence = 0.6
+
+    fp_growth = FPGrowth(itemsCol="items", minSupport=min_support, minConfidence=min_confidence)
+    model = fp_growth.fit(df)
+
+    # Display frequent itemsets and association rules
+    frequent_itemsets = model.freqItemsets
+    association_rules = model.associationRules
+
+    return frequent_itemsets, association_rules
 
 # Create Spark session
 spark = SparkSession.builder \
@@ -24,7 +53,14 @@ spark = SparkSession.builder \
 
 # Define the schema for the input data
 input_schema = StructType([
-    # ... (same as previous input_schema)
+    StructField("timestamp", TimestampType(), True),
+    StructField("src_ip", StringType(), True),
+    StructField("dest_ip", StringType(), True),
+    StructField("src_port", IntegerType(), True),
+    StructField("dest_port", IntegerType(), True),
+    StructField("protocol", StringType(), True),
+    StructField("request", StringType(), True),
+    StructField("attack_type", StringType(), True),
 ])
 
 # Read the batch log data
